@@ -1,0 +1,7 @@
+build/
+.dep/
+*.o
+simdisk/
+__pycache__/
+roms/*
+!roms/README.md
