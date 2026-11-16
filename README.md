@@ -27,6 +27,18 @@ To return to Free42 or C47: in HP47's menu press **7 setup → System**, or use 
 **Where the ROM goes.** HP47 reads the 512 KB ROM into the heap when there is room. If the heap is too small it asks to
 write the ROM once into DMCP's QSPI user area (and finds it there afterwards). *About* (menu 8) says where it is.
 
+**"no room: heap … KB, QSPI 0 KB"**: the DM42n has neither. Then build HP47 yourself with the ROM inside the program
+(it goes into the program's flash, where it needs no heap at all), and load that .pg5 instead:
+
+```bash
+cd ~/opt/hp47.pg5
+make clean
+make ROM_IN=roms/gxrom-r      # your ROM copied into roms/ first; -> build/HP47.pg5 (about 575 KB)
+```
+
+That HP47.pg5 carries HP's ROM: keep it for your own calculator, never publish it (the release has no ROM).
+The ROM file in /HP47 is then not needed; *About* says "built in".
+
 **The HP keeps its state.** When the calculator turns off (the HP's own OFF, its 10-minute auto-off, or the menu's
 OFF), HP47 saves the HP's state and its 128 KB of RAM in `/HP47/HP47.STA`. The next start goes on where it was, and
 the HP's clock moves on by the time it was off.
@@ -76,6 +88,7 @@ Requirements: `arm-none-eabi-gcc` with newlib, `make`, `python3` (Pillow for the
 ```bash
 cd ~/opt/hp47.pg5
 make              # -> build/HP47.pg5 (copy it to release/ for a release)
+make ROM_IN=roms/gxrom-r   # the ROM built in: for your own calculator only, never released
 make test         # boot, arithmetic, the state round trip, the BEEP's pitch (on the real ROM)
 make keys         # every C47-layout key run on the ROM -> build/keys/keys-*.png
 make shots        # the PC simulator's screens -> build/sim/run/*.png
