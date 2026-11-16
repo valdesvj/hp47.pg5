@@ -9,7 +9,7 @@ Part of the "47" family of projects (almanac47, chess47.pg5, nav47.pg5, zx47.pg5
 ![HP47 screens](docs/screens.png)
 
 > **Version 0.1: first build, not yet tested on the calculator.** Everything here runs on the PC with the real ROM
-> (`make test`, `make keys`, `make shots`); the DM42n's speed, memory and QSPI are still to be seen.
+> (`make test`, `make keys`, `make shots`); the DM42n's speed and memory are still to be seen.
 
 ## Install on the DM42n
 
@@ -24,11 +24,15 @@ Part of the "47" family of projects (almanac47, chess47.pg5, nav47.pg5, zx47.pg5
 The first start asks **"Try To Recover Memory?"**: press **F6 (NO)**, as on a new HP 48.
 To return to Free42 or C47: in HP47's menu press **7 setup → System**, or use **RESET+F1**. Needs DMCP5 3.57 or later.
 
-**Where the ROM goes.** HP47 reads the 512 KB ROM into the heap when there is room. If the heap is too small it asks to
-write the ROM once into DMCP's QSPI user area (and finds it there afterwards). *About* (menu 8) says where it is.
+**Where the ROM goes.** When the heap has a free 512 KB block, HP47 reads the whole ROM into it. When it has not
+(as on the DM42n), the ROM file stays in /HP47 and HP47 reads it **2 KB at a time, as the HP needs it**, into a cache
+as big as the heap allows. A whole HP 48 session uses about 280 KB of the ROM, so with a cache of 128 KB or more almost
+every part is read only once: the first time you open the equation writer, say, it waits a moment for the disk.
+*About* (menu 8) shows the cache's size and how many blocks were read. The results are the same as with the whole
+ROM in memory (`make test`, `make keys` run both ways).
 
-**"no room: heap … KB, QSPI 0 KB"**: the DM42n has neither. Then build HP47 yourself with the ROM inside the program
-(it goes into the program's flash, where it needs no heap at all), and load that .pg5 instead:
+**Faster, for your own calculator:** build HP47 with the ROM inside the program's flash: nothing is read from the
+disk, and it needs no heap for the ROM.
 
 ```bash
 cd ~/opt/hp47.pg5

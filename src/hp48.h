@@ -40,13 +40,19 @@ typedef struct {
   uint32_t toggle_instr;                /* instructions between the first and last of those edges */
   int sleeping;                         /* SHUTDN: waiting for a timer or a key */
   int off;                              /* sleeping with OUT = 0: the HP is off (ON wakes it) */
-  int bad;                              /* an unknown opcode stopped the CPU (its PC in bad_pc) */
+  int bad;                              /* 1: an unknown opcode stopped the CPU (its PC in bad_pc); 2: the ROM file failed */
+  uint32_t rom_loads;                   /* ROM blocks read into the cache (paged) */
   uint32_t bad_pc;
 } HpStat;
 extern HpStat hp;
 
 /* rom: HP_ROM_BYTES (stays where it is: flash, QSPI or heap); ram: HP_RAM_BYTES */
 int  hp_init(const uint8_t *rom, uint8_t *ram);
+/* or the ROM read from a file as it is used: slots blocks of 2 KB in cache (8..256), fetch(blk, dst) puts the ROM's
+   bytes blk * 2048 .. + 2047 at dst (0 ok) */
+int  hp_init_paged(uint8_t *cache, int slots, int (*fetch)(uint32_t blk, uint8_t *dst), uint8_t *ram);
+void hp_rom_flush(void);                /* forget the cached ROM blocks (before the ROM file is closed) */
+int  hp_rom_slots(void);                /* the cache's slots, 0 when the ROM is resident */
 void hp_reset(void);                    /* the CPU and the chips (the RAM is kept: the ROM checks it, as ON+C) */
 void hp_clear_ram(void);                /* all of the RAM to zero: the next boot is a "Memory Clear" */
 void hp_run(uint32_t ms, uint32_t max_instr);   /* ms of HP time: the timers by the ms, at most max_instr instructions */

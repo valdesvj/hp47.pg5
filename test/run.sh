@@ -10,6 +10,10 @@ SUM="KEY:1 KEY:2 KEY:ENTER KEY:3 KEY:ADD KEY:SIN WAIT:500"
 $T $ROM $BOOT $SUM SHOT:$W/sum.pbm > $W/run1.txt || bad "boot: $(tail -1 $W/run1.txt)"
 cmp -s $W/sum.pbm test/ref/sum.pbm && ok "boot, 12 ENTER 3 + SIN = .258819045103" || bad "the sum's screen (see $W/sum.pbm)"
 
+# 1b. the same through the ROM cache (24 blocks of 2 KB: far smaller than a calculator's), the same screen
+$T $ROM -cache 24 $BOOT $SUM SHOT:$W/sumc.pbm > /dev/null 2>&1 && cmp -s $W/sumc.pbm test/ref/sum.pbm &&
+  ok "the ROM cache (48 KB): the same screen" || bad "the ROM cache: the sum's screen ($W/sumc.pbm)"
+
 # 2. the state and RAM saved and loaded back: the same screen, and the HP goes on (one more key)
 $T $ROM $BOOT $SUM SHOT:$W/a.pbm STATE:$W/st.bin SHOT:$W/b.pbm KEY:COS WAIT:500 SHOT:$W/c.pbm > /dev/null &&
   cmp -s $W/a.pbm $W/b.pbm && ! cmp -s $W/b.pbm $W/c.pbm && ok "state round trip" || bad "state round trip"

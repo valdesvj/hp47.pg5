@@ -34,7 +34,7 @@ static Cfg cfg = { LAYOUT_C47, 1, 0, 0 };
 
 static uint8_t *ram;                        /* 128 KB, heap */
 static const uint8_t *rom;                  /* 512 KB: heap or QSPI */
-static int rom_where;                       /* 0 none, 1 heap, 2 QSPI user area, 3 built in (ROM_IN) */
+static int rom_where;                       /* 0 none, 1 heap, 3 built in (ROM_IN), 4 the cache (paged) */
 static uint32_t rom_crc;
 static char rom_ver[16] = "";
 static char msg[64] = "";                   /* the menu's message line */
@@ -149,23 +149,6 @@ static int is_48g(const uint8_t *p) {       /* "HP48-" at nibble 0x7ffbf, as hp_
   return 1;
 }
 
-/* the QSPI user area: the ROM at 0, a trailer (magic, crc) right after it */
-#define QSPI_MAGIC 0x52344850u              /* "PH4R" */
-static int qspi_has(uint32_t crc) {
-  if (qspi_user_size() < (int)(HP_ROM_BYTES + 16)) return 0;
-  const uint32_t *t = (const uint32_t *)(qspi_user_addr() + HP_ROM_BYTES);
-  return t[0] == QSPI_MAGIC && t[1] == crc && crc32_add(0, qspi_user_addr(), HP_ROM_BYTES) == crc;
-}
-
-static void progress(const char *what, uint32_t done) {
-  char s[48];
-  sprintf(s, "%s  %u KB", what, (unsigned)(done / 1024));
-  lcd_fill_rect(0, 120, LCD_X, 24, 0);
-  text(20, 122, s, 0);
-  lcd_refresh_lines(120, 24);
-  lcd_refresh_wait();
-}
-
 static int confirm(const char *title, const char *l1, const char *l2) {
   lcd_clear_buf();
   bar(title);
@@ -181,55 +164,89 @@ static int confirm(const char *title, const char *l1, const char *l2) {
   }
 }
 
-/* load the ROM at path: 0 ok (rom, rom_where, rom_crc set), else msg says why */
+/* The ROM cache (paged): the ROM file stays open and the HP reads it 2 KB at a time as it needs it (hp48.c).
+   A whole HP 48 session touches about 280 KB of the 512; with a cache of 128 KB or more almost every block is read
+   only once. The file is closed while the calculator is off or in DMCP's setup (the USB disk), opened again on use. */
+#define CACHE_RESERVE (40u * 1024u)         /* the heap left for the rest: state saving, menus, files */
+static RomFile *rf;                         /* the open ROM file (paged) */
+static char rom_path[64];
+static uint8_t *cache;
+static int slots;
+
+static void rom_close(void) { if (rf && rf->f.obj.fs) f_close(&rf->f); if (rf) rf->f.obj.fs = 0; }
+
+static int rom_fetch(uint32_t blk, uint8_t *dst) {
+  if (!rf) return -1;
+  if (!rf->f.obj.fs && rom_open(rf, rom_path)) return -1;
+  if (f_lseek(&rf->f, (FSIZE_t)blk * 2048u * (rf->unpacked ? 2u : 1u)) != FR_OK) return -1;
+  return rom_read(rf, dst, 2048);
+}
+
+static void rom_free(void) {
+  if (rom_where == 1) free((void *)rom);
+  if (rom_where == 4) { rom_close(); free(rf); rf = NULL; free(cache); cache = NULL; }
+  rom = NULL; rom_where = 0;
+}
+
+static int hp_start(void) {                 /* the HP on the ROM as loaded */
+  return rom_where == 4 ? hp_init_paged(cache, slots, rom_fetch, ram) : hp_init(rom, ram);
+}
+
+/* load the ROM at path: 0 ok (rom, rom_where, rom_crc set), else msg says why. The whole ROM in the heap when it
+   fits, else the cache with what the heap allows. */
 static int rom_load(const char *path) {
   RomFile *r = malloc(sizeof *r);
   if (!r) { strcpy(msg, "no memory"); return -1; }
+  memset(r, 0, sizeof *r);
   if (rom_open(r, path)) { free(r); return -1; }
   lcd_clear_buf();
   bar("HP47: reading the ROM");
   text(4, 40, path, 0);
   lcd_refresh();
-  if (rom_where == 1) { free((void *)rom); rom = NULL; rom_where = 0; }
+  rom_free();
   int e = -1;
   uint8_t *heap = (uint32_t)sys_largest_free_mem() >= HP_ROM_BYTES + 48u * 1024u ? malloc(HP_ROM_BYTES) : NULL;
-  if (heap) {                                           /* the heap: simplest, nothing written anywhere */
+  if (heap) {                                           /* all of it in the heap */
     e = rom_read(r, heap, HP_ROM_BYTES);
     if (!e && !is_48g(heap)) { e = -1; strcpy(msg, "not a 48G/GX ROM"); }
     else if (e) strcpy(msg, "read error");
     if (e) free(heap);
     else { rom = heap; rom_where = 1; rom_crc = crc32_add(0, heap, HP_ROM_BYTES); }
-  } else if (qspi_user_size() >= (int)(HP_ROM_BYTES + 16)) {   /* the QSPI user area, 64 KB at a time */
-    uint8_t *buf = malloc(65536);
-    if (!buf) strcpy(msg, "no memory for the QSPI copy");
-    else {
-      uint32_t crc = 0;                                 /* the file's crc first: maybe it is there already */
-      e = 0;
-      for (uint32_t o = 0; o < HP_ROM_BYTES && !e; o += 65536) { e = rom_read(r, buf, 65536); crc = crc32_add(crc, buf, 65536); }
-      if (e) strcpy(msg, "read error");
-      else if (qspi_has(crc)) { rom = qspi_user_addr(); rom_where = 2; rom_crc = crc; }
-      else if (!confirm("HP47: the ROM to the QSPI user area", "The heap is too small for the ROM: write it",
-                        "to DMCP's QSPI user area (once, 512 KB)?")) { e = -1; strcpy(msg, "ROM not loaded"); }
-      else {
-        f_lseek(&r->f, 0);
-        for (uint32_t o = 0; o < HP_ROM_BYTES && !e; o += 65536) {
-          progress("writing QSPI", o);
-          e = rom_read(r, buf, 65536) || qspi_user_write(buf, 65536, (int)o, 1) < 0 ||
-              memcmp(qspi_user_addr() + o, buf, 65536);
-        }
-        uint32_t t[4] = { QSPI_MAGIC, crc, 0, 0 };
-        if (!e) e = qspi_user_write((uint8_t *)t, sizeof t, HP_ROM_BYTES, 1) < 0;
-        if (e) strcpy(msg, "QSPI write failed");
-        else if (!is_48g(qspi_user_addr())) { e = -1; strcpy(msg, "not a 48G/GX ROM"); }
-        else { rom = qspi_user_addr(); rom_where = 2; rom_crc = crc; }
-      }
-      free(buf);
+    f_close(&r->f);
+    free(r);
+    return e;
+  }
+  uint32_t fr = (uint32_t)sys_largest_free_mem();      /* the cache: as many 2 KB blocks as the heap allows */
+  int n = fr > CACHE_RESERVE ? (int)((fr - CACHE_RESERVE) / 2048u) : 0;
+  if (n > 255) n = 255;
+  if (n < 24 || !(cache = malloc((size_t)n * 2048u))) {
+    snprintf(msg, sizeof msg, "no room: heap %u KB (48 KB at least)", (unsigned)(fr / 1024));
+    f_close(&r->f); free(r); cache = NULL;
+    return -1;
+  }
+  uint32_t crc = 0;                                     /* the crc (the state file's ROM), block 255 checked */
+  e = 0;
+  for (uint32_t b = 0; b < 256 && !e; b++) { e = rom_read(r, cache, 2048); crc = crc32_add(crc, cache, 2048); }
+  /* "HP48-" at nibble 0x7ffbf = byte 0x3ffdf: in block 127 */
+  if (!e) e = f_lseek(&r->f, 127u * 2048u * (r->unpacked ? 2u : 1u)) != FR_OK || rom_read(r, cache, 2048);
+  if (!e) {
+    static const char want[] = "HP48-";
+    for (int i = 0; i < 5 && !e; i++) {
+      uint32_t a = 0x7ffbf + 2u * (uint32_t)i - 127u * 4096u;
+      int lo = cache[a >> 1] >> ((a & 1) * 4) & 15, hi = cache[(a + 1) >> 1] >> (((a + 1) & 1) * 4) & 15;
+      if ((char)(lo | hi << 4) != want[i]) e = -2;
     }
-  } else snprintf(msg, sizeof msg, "no room: heap %u KB, QSPI %u KB (512 needed)",
-                  (unsigned)(sys_largest_free_mem() / 1024), (unsigned)(qspi_user_size() / 1024));
-  f_close(&r->f);
-  free(r);
-  return e;
+  }
+  if (e) {
+    strcpy(msg, e == -2 ? "not a 48G/GX ROM" : "read error");
+    f_close(&r->f); free(r); free(cache); cache = NULL;
+    return -1;
+  }
+  rf = r;
+  strncpy(rom_path, path, sizeof rom_path - 1);
+  slots = n;
+  rom = cache; rom_where = 4; rom_crc = crc;
+  return 0;
 }
 
 #ifdef HP47_ROM_IN
@@ -559,8 +576,10 @@ static void about(void) {
     "DMCP5 SDK (BSD-3, NOMAS)",
   };
   for (unsigned i = 0; i < sizeof L / sizeof *L; i++) { text(4, y, L[i], 0); y += 21; }
-  sprintf(s, "ROM: %s %s (crc %08x)", rom_ver[0] ? rom_ver : "none",
-          rom_where == 1 ? "in the heap" : rom_where == 2 ? "in QSPI" : rom_where == 3 ? "built in" : "", (unsigned)rom_crc);
+  if (rom_where == 4)
+    sprintf(s, "ROM: %s, cache %d KB, %u reads", rom_ver[0] ? rom_ver : "none", slots * 2, (unsigned)hp.rom_loads);
+  else sprintf(s, "ROM: %s %s (crc %08x)", rom_ver[0] ? rom_ver : "none",
+               rom_where == 1 ? "in the heap" : rom_where == 3 ? "built in" : "", (unsigned)rom_crc);
   text(4, y + 4, s, 0); y += 25;
   sprintf(s, "Free heap: %d KB  (largest %d KB)", sys_free_mem() / 1024, sys_largest_free_mem() / 1024);
   text(4, y, s, 0); y += 21;
@@ -643,7 +662,7 @@ static void menu_run(void) {
     case KEY_F1:
       if (rom_pick() || !rom) {                         /* a failed load may have dropped the old ROM */
         if (!rom && rom_find()) rom_needed();
-        hp_init(rom, ram); hp_rom_version(rom_ver); state_load(); strcpy(msg, "ROM loaded"); goto out;
+        hp_start(); hp_rom_version(rom_ver); state_load(); strcpy(msg, "ROM loaded"); goto out;
       }
       break;
     case KEY_F2: strcpy(msg, state_save() ? "state NOT saved" : "state saved in " STATE_FILE); break;
@@ -662,7 +681,8 @@ static void menu_run(void) {
     case KEY_5: keyhelp(); break;
     case KEY_6: keytest(); break;
     case KEY_7:                                         /* System may leave HP47: the HP's state first */
-      state_save(); wait_release(); handle_menu(&SETUP_MENU, MENU_RESET, 0); wait_release(); break;
+      state_save(); rom_close(); wait_release();       /* the USB disk may change the ROM file: read it afresh */
+      handle_menu(&SETUP_MENU, MENU_RESET, 0); wait_release(); hp_rom_flush(); break;
     case KEY_8: about(); break;
     default: continue;
     }
@@ -680,6 +700,7 @@ static void power_off(void) {               /* the HP's state is saved: it goes 
   stop_buzzer(); tone = 0;
   keys_reset();
   state_save();
+  rom_close();                                          /* opened again when the HP needs a ROM block */
   uint32_t t0 = now_s();
   SET_ST(STAT_PGM_END);
   if (!ST(STAT_SUSPENDED)) {
@@ -714,7 +735,7 @@ void program_main(void) {
   if (s == -1) { fatal("HP47: not enough memory", ""); for (;;) wait_for_key_press(); }
   cfg_load();
   if (rom_find()) rom_needed();
-  if (hp_init(rom, ram)) { fatal("HP47: not enough memory", ""); for (;;) wait_for_key_press(); }
+  if (hp_start()) { fatal("HP47: not enough memory", ""); for (;;) wait_for_key_press(); }
   hp_rom_version(rom_ver);
   if (state_load() == 0) say("the HP goes on where it was");
   frame_ui();
@@ -766,7 +787,8 @@ void program_main(void) {
 
     if (hp.bad) {                                       /* an opcode x48 does not know: say where */
       char s2[40];
-      sprintf(s2, "HP stopped: opcode at %05x", (unsigned)hp.bad_pc);
+      if (hp.bad == 2) sprintf(s2, "ROM file read failed (%05x)", (unsigned)hp.bad_pc);
+      else sprintf(s2, "HP stopped: opcode at %05x", (unsigned)hp.bad_pc);
       say(s2);
       hp.bad = 0;
       hp_reset();

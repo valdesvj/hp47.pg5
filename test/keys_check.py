@@ -6,6 +6,7 @@ import os, re, subprocess, sys
 from PIL import Image, ImageDraw, ImageFont
 
 hptest, rom, out = sys.argv[1:4]
+extra = sys.argv[4].split() if len(sys.argv) > 4 else []   # e.g. "-cache 24": the same screens through the ROM cache
 src = open(os.path.join(os.path.dirname(__file__), '..', 'src', 'keys.c')).read()
 table = src[src.index('static const C47Key C47[]'):src.index('/* the C47\'s letters')]
 ACT = r'(K1\([^)]*\)|K2\([^)]*\)|K3\([^)]*\)|SP\([^)]*\))'
@@ -28,7 +29,7 @@ for m in row.finditer(table):
             continue
         n = len(cases)
         shot = os.path.join(out, 'k%03d.pbm' % n)
-        cmd = [hptest, rom] + BOOT + ['KEY:' + k for k in ks] + ['WAIT:1200', 'SHOT:' + shot]
+        cmd = [hptest, rom] + extra + BOOT + ['KEY:' + k for k in ks] + ['WAIT:1200', 'SHOT:' + shot]
         r = subprocess.run(cmd, capture_output=True, text=True)
         cases.append(('%s%s: %s' % (shift, key, label), shot, ' '.join(ks), r.returncode))
 
