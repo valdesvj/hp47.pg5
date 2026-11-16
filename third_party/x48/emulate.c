@@ -124,7 +124,7 @@ decode_group_80()
   int t, op3, op4, op5, op6;
   unsigned char *REG;
   long addr;
-  op3 = read_nibble(saturn.PC + 2);
+  op3 = fetch_nib(saturn.PC + 2);
   switch (op3) {
     case 0:	/* OUT=CS */
       saturn.PC += 3;
@@ -162,19 +162,19 @@ decode_group_80()
       do_shutdown();
       return 0;
     case 8:
-      op4 = read_nibble(saturn.PC + 3);
+      op4 = fetch_nib(saturn.PC + 3);
       switch (op4) {
         case 0:		/* INTON */
           saturn.PC += 4;
           do_inton();
 	  return 0;
         case 1:		/* RSI... */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
           saturn.PC += 5;
           do_reset_interrupt_system();
 	  return 0;
         case 2:		/* LA... */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
           load_constant(saturn.A, op5 + 1, saturn.PC + 5);
           saturn.PC += 6 + op5;
 	  return 0;
@@ -182,22 +182,22 @@ decode_group_80()
           saturn.PC += 4;
 	  return 0;
         case 4:		/* ABIT=0 */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
           saturn.PC += 5;
           clear_register_bit(saturn.A, op5);
 	  return 0;
         case 5:		/* ABIT=1 */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
           saturn.PC += 5;
           set_register_bit(saturn.A, op5);
 	  return 0;
         case 8:		/* CBIT=0 */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
           saturn.PC += 5;
           clear_register_bit(saturn.C, op5);
 	  return 0;
         case 9:		/* CBIT=1 */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
           saturn.PC += 5;
           set_register_bit(saturn.C, op5);
 	  return 0;
@@ -205,7 +205,7 @@ decode_group_80()
         case 7:		/* ?ABIT=1 */
         case 0xa:	/* ?CBIT=0 */
         case 0xb:	/* ?CBIT=1 */
-          op5 = read_nibble(saturn.PC + 4);
+          op5 = fetch_nib(saturn.PC + 4);
 	  if (op4 < 8)
             REG = saturn.A;
           else
@@ -217,7 +217,7 @@ decode_group_80()
           saturn.CARRY = (get_register_bit(REG, op5) == t)?1:0;
 	  if (saturn.CARRY) {
 	    saturn.PC += 5;
-            op6 = read_nibbles(saturn.PC, 2);
+            op6 = fetch_nibs(saturn.PC, 2);
       	    if (op6) {
               if (op6 & 0x80)
                 op6 |= jumpmasks[2];
@@ -262,12 +262,12 @@ decode_group_80()
       saturn.PC += 3;
       return 0;
     case 0xc:   /* C=P n */
-      op4 = read_nibble(saturn.PC + 3);
+      op4 = fetch_nib(saturn.PC + 3);
       saturn.PC += 4;
       set_register_nibble(saturn.C, op4, saturn.P);
       return 0;
     case 0xd:	/* P=C n */
-      op4 = read_nibble(saturn.PC + 3);
+      op4 = fetch_nib(saturn.PC + 3);
       saturn.PC += 4;
       saturn.P = get_register_nibble(saturn.C, op4);
       return 0;
@@ -277,7 +277,7 @@ decode_group_80()
       saturn.SR = 0;
       return 0;
     case 0xf:	/* CPEX n */
-      op4 = read_nibble(saturn.PC + 3);
+      op4 = fetch_nib(saturn.PC + 3);
       saturn.PC += 4;
       t = get_register_nibble(saturn.C, op4);
       set_register_nibble(saturn.C, op4, saturn.P);
@@ -297,10 +297,10 @@ decode_group_1()
 {
   int op, op2, op3, op4;
 
-  op2 = read_nibble(saturn.PC + 1);
+  op2 = fetch_nib(saturn.PC + 1);
   switch (op2) {
     case 0:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       switch (op3) {
         case 0:		/* saturn.R0=A */
           saturn.PC += 3;
@@ -352,7 +352,7 @@ decode_group_1()
           return 1;
       }
     case 1:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       switch (op3) {
         case 0:		/* A=R0 */
           saturn.PC += 3;
@@ -404,7 +404,7 @@ decode_group_1()
           return 1;
       }
     case 2:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       switch (op3) {
         case 0:		/* AR0EX */
           saturn.PC += 3;
@@ -456,7 +456,7 @@ decode_group_1()
           return 1;
       }
     case 3:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       switch (op3) {
         case 0:		/* D0=A */
           saturn.PC += 3;
@@ -526,7 +526,7 @@ decode_group_1()
           return 1;
       }
     case 4:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       op = op3 < 8 ? 0xf : 6;
       switch(op3 & 7) {
         case 0:	/* DAT0=A */
@@ -565,8 +565,8 @@ decode_group_1()
 	  return 1;
       }
     case 5:
-      op3 = read_nibble(saturn.PC + 2);
-      op4 = read_nibble(saturn.PC + 3);
+      op3 = fetch_nib(saturn.PC + 2);
+      op4 = fetch_nib(saturn.PC + 3);
       if (op3 >= 8) {
 	switch(op3 & 7) {
           case 0:	/* DAT0=A */
@@ -643,17 +643,17 @@ decode_group_1()
         }
       }
     case 6:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       saturn.PC += 3;
       add_address(&saturn.D0, op3+1);
       return 0;
     case 7:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       saturn.PC += 3;
       add_address(&saturn.D1, op3+1);
       return 0;
     case 8:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       saturn.PC += 3;
       add_address(&saturn.D0, -(op3+1));
       return 0;
@@ -670,7 +670,7 @@ decode_group_1()
       saturn.PC += 7;
       return 0;
     case 0xc:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       saturn.PC += 3;
       add_address(&saturn.D1, -(op3+1));
       return 0;
@@ -701,14 +701,14 @@ int op1;
 {
   int op2, op3, op4, op5, op6;
 
-  op2 = read_nibble(saturn.PC + 1);
+  op2 = fetch_nib(saturn.PC + 1);
   switch (op1) {
     case 8:
       switch (op2) {
         case 0:
           return decode_group_80();
         case 1:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
           switch (op3) {
             case 0:	/* ASLC */
               saturn.PC += 3;
@@ -743,9 +743,9 @@ int op1;
               shift_right_circ_register(saturn.D, W_FIELD);
               return 0;
             case 8:	/* R = R +/- CON */
-              op4 = read_nibble(saturn.PC + 3);
-              op5 = read_nibble(saturn.PC + 4);
-              op6 = read_nibble(saturn.PC + 5);
+              op4 = fetch_nib(saturn.PC + 3);
+              op5 = fetch_nib(saturn.PC + 4);
+              op6 = fetch_nib(saturn.PC + 5);
               if (op5 < 8) {	/* PLUS */
                 switch (op5 & 3) {
                   case 0:	/* A=A+CON */
@@ -790,8 +790,8 @@ int op1;
                 }
               }
             case 9:	/* R SRB FIELD */
-              op4 = read_nibble(saturn.PC + 3);
-              op5 = read_nibble(saturn.PC + 4);
+              op4 = fetch_nib(saturn.PC + 3);
+              op5 = fetch_nib(saturn.PC + 4);
               switch (op5 & 3) {
                 case 0:
                   saturn.PC += 5;
@@ -813,9 +813,9 @@ int op1;
                   return 1;
               }
             case 0xa:	/* R = R FIELD, etc. */
-              op4 = read_nibble(saturn.PC + 3);
-              op5 = read_nibble(saturn.PC + 4);
-              op6 = read_nibble(saturn.PC + 5);
+              op4 = fetch_nib(saturn.PC + 3);
+              op5 = fetch_nib(saturn.PC + 4);
+              op6 = fetch_nib(saturn.PC + 5);
               switch (op5) {
                 case 0:
                   switch (op6) {
@@ -974,7 +974,7 @@ int op1;
                   return 1;
               }
             case 0xb:
-              op4 = read_nibble(saturn.PC + 3);
+              op4 = fetch_nib(saturn.PC + 3);
               switch(op4) {
                 case 2:		/* PC=A */
                   jumpaddr = dat_to_addr(saturn.A);
@@ -1027,16 +1027,16 @@ int op1;
               return 1;
           }
         case 2:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
           saturn.PC += 3;
           clear_hardware_stat(op3);
           return 0;
         case 3:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
           saturn.CARRY = is_zero_hardware_stat(op3);
 	  if (saturn.CARRY) {
 	    saturn.PC += 3;
-            op4 = read_nibbles(saturn.PC, 2);
+            op4 = fetch_nibs(saturn.PC, 2);
       	    if (op4) {
               if (op4 & 0x80)
                 op4 |= jumpmasks[2];
@@ -1051,7 +1051,7 @@ int op1;
           return 0;
         case 4:
         case 5:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
 	  if (op2 == 4) {
 	    saturn.PC += 3;
             clear_program_stat(op3);
@@ -1062,14 +1062,14 @@ int op1;
           return 0;
         case 6:
         case 7:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
 	  if (op2 == 6)
             saturn.CARRY = (get_program_stat(op3) == 0)?1:0;
           else
             saturn.CARRY = (get_program_stat(op3) != 0)?1:0;
 	  if (saturn.CARRY) {
 	    saturn.PC += 3;
-            op4 = read_nibbles(saturn.PC, 2);
+            op4 = fetch_nibs(saturn.PC, 2);
       	    if (op4) {
               if (op4 & 0x80)
                 op4 |= jumpmasks[2];
@@ -1084,14 +1084,14 @@ int op1;
           return 0;
         case 8:
         case 9:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
 	  if (op2 == 8)
             saturn.CARRY = (saturn.P != op3)?1:0;
           else
             saturn.CARRY = (saturn.P == op3)?1:0;
 	  if (saturn.CARRY) {
 	    saturn.PC += 3;
-            op4 = read_nibbles(saturn.PC, 2);
+            op4 = fetch_nibs(saturn.PC, 2);
       	    if (op4) {
               if (op4 & 0x80)
                 op4 |= jumpmasks[2];
@@ -1105,7 +1105,7 @@ int op1;
 	  }
           return 0;
         case 0xa:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
           switch(op3) {
             case 0:	/* ?A=B */
 	      saturn.CARRY = is_equal_register(saturn.A, saturn.B, A_FIELD);
@@ -1160,7 +1160,7 @@ int op1;
           }
 	  if (saturn.CARRY) {
 	    saturn.PC += 3;
-            op4 = read_nibbles(saturn.PC, 2);
+            op4 = fetch_nibs(saturn.PC, 2);
       	    if (op4) {
               if (op4 & 0x80)
                 op4 |= jumpmasks[2];
@@ -1174,7 +1174,7 @@ int op1;
 	  }
           return 0;
 	case 0xb:
-          op3 = read_nibble(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 2);
           switch (op3) {
             case 0:	/* ?A>B */
 	      saturn.CARRY = is_greater_register(saturn.A, saturn.B, A_FIELD);
@@ -1229,7 +1229,7 @@ int op1;
           }
 	  if (saturn.CARRY) {
 	    saturn.PC += 3;
-            op4 = read_nibbles(saturn.PC, 2);
+            op4 = fetch_nibs(saturn.PC, 2);
       	    if (op4) {
               if (op4 & 0x80)
                 op4 |= jumpmasks[2];
@@ -1243,19 +1243,19 @@ int op1;
 	  }
           return 0;
 	case 0xc:
-          op3 = read_nibbles(saturn.PC + 2, 4);
+          op3 = fetch_nibs(saturn.PC + 2, 4);
           if (op3 & 0x8000)
             op3 |= jumpmasks[4];
           jumpaddr = (saturn.PC + op3 + 2) & 0xfffff;
           saturn.PC = jumpaddr;
 	  return 0;
 	case 0xd:
-          op3 = read_nibbles(saturn.PC + 2, 5);
+          op3 = fetch_nibs(saturn.PC + 2, 5);
           jumpaddr = op3;
           saturn.PC = jumpaddr;
 	  return 0;
 	case 0xe:
-          op3 = read_nibbles(saturn.PC + 2, 4);
+          op3 = fetch_nibs(saturn.PC + 2, 4);
           if (op3 & 0x8000)
             op3 |= jumpmasks[4];
           jumpaddr = (saturn.PC + op3 + 6) & 0xfffff;
@@ -1263,7 +1263,7 @@ int op1;
           saturn.PC = jumpaddr;
 	  return 0;
 	case 0xf:
-          op3 = read_nibbles(saturn.PC + 2, 5);
+          op3 = fetch_nibs(saturn.PC + 2, 5);
           jumpaddr = op3;
 	  push_return_addr(saturn.PC + 7);
           saturn.PC = jumpaddr;
@@ -1272,7 +1272,7 @@ int op1;
           return 1;
       }
     case 9:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       if (op2 < 8) {
         switch(op3) {
           case 0:	/* ?A=B */
@@ -1383,7 +1383,7 @@ int op1;
       }
       if (saturn.CARRY) {
 	saturn.PC += 3;
-        op4 = read_nibbles(saturn.PC, 2);
+        op4 = fetch_nibs(saturn.PC, 2);
       	if (op4) {
           if (op4 & 0x80)
             op4 |= jumpmasks[2];
@@ -1397,7 +1397,7 @@ int op1;
       }
       return 0;
     case 0xa:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       if (op2 < 8) {
 	switch(op3) {
 	  case 0:	/* A=A+B */
@@ -1539,7 +1539,7 @@ int op1;
 	}
       }
     case 0xb:
-      op3 = read_nibble(saturn.PC + 2);
+      op3 = fetch_nib(saturn.PC + 2);
       if (op2 < 8) {
         switch (op3) {
           case 0:	/* A=A-B */
@@ -1973,10 +1973,10 @@ step_instruction()
 
   jumpaddr = 0;
 
-  op0 = read_nibble(saturn.PC);
+  op0 = fetch_nib(saturn.PC);  /* HP47: fetch_nib/fetch_nibs for the opcode's nibbles (hp47_x48.h) */
   switch (op0) {
     case 0:
-      op1 = read_nibble(saturn.PC + 1);
+      op1 = fetch_nib(saturn.PC + 1);
       switch (op1) {
         case 0:	/* RTNSXM */
           saturn.XM = 1;
@@ -2048,8 +2048,8 @@ step_instruction()
           }
 	  break;
         case 0xe:
-          op2 = read_nibble(saturn.PC + 2);
-          op3 = read_nibble(saturn.PC + 3);
+          op2 = fetch_nib(saturn.PC + 2);
+          op3 = fetch_nib(saturn.PC + 3);
           switch(op3) {
             case 0:	/* A=A&B */
               saturn.PC += 4;
@@ -2132,17 +2132,17 @@ step_instruction()
       stop = decode_group_1();
       break;
     case 2:
-      op2 = read_nibble(saturn.PC + 1);
+      op2 = fetch_nib(saturn.PC + 1);
       saturn.PC += 2;
       saturn.P = op2;
       break;
     case 3:
-      op2 = read_nibble(saturn.PC + 1);
+      op2 = fetch_nib(saturn.PC + 1);
       load_constant(saturn.C, op2 + 1, saturn.PC + 2);
       saturn.PC += 3 + op2;
       break;
     case 4:
-      op2 = read_nibbles(saturn.PC + 1, 2);
+      op2 = fetch_nibs(saturn.PC + 1, 2);
       if (op2 == 0x02) {
         saturn.PC += 3;
       } else if (saturn.CARRY != 0) {
@@ -2160,7 +2160,7 @@ step_instruction()
       break;
     case 5:
       if (saturn.CARRY == 0) {
-	op2 = read_nibbles(saturn.PC + 1, 2);
+	op2 = fetch_nibs(saturn.PC + 1, 2);
         if (op2) {
           if (op2 & 0x80)
             op2 |= jumpmasks[2];
@@ -2174,11 +2174,11 @@ step_instruction()
       }
       break;
     case 6:
-      op2 = read_nibbles(saturn.PC + 1, 3);
+      op2 = fetch_nibs(saturn.PC + 1, 3);
       if (op2 == 0x003) {
         saturn.PC += 4;
       } else if(op2 == 0x004) {
-        op3 = read_nibbles(saturn.PC + 4, 1);
+        op3 = fetch_nibs(saturn.PC + 4, 1);
         saturn.PC += 5;
         if (op3 != 0) {
           enter_debugger |= TRAP_INSTRUCTION;
@@ -2192,7 +2192,7 @@ step_instruction()
       }
       break;
     case 7:
-      op2 = read_nibbles(saturn.PC + 1, 3);
+      op2 = fetch_nibs(saturn.PC + 1, 3);
       if (op2 & 0x800)
         op2 |= jumpmasks[3];
       jumpaddr = (op2 + saturn.PC + 4) & 0xfffff;

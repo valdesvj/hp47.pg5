@@ -8,6 +8,7 @@
 # The tests need an HP 48G/GX ROM, which is not in the repo: roms/gxrom-r (hpcalc.org), or ROM=path.
 # make test         the PC tests: boot, keys, arithmetic, the state round trip, the BEEP's pitch, the C47 keys
 # make sim          the PC simulator (build/sim/sim); make shots: its screens -> build/sim/run/*.png
+# make bench        a busy RPL loop on the ROM: HP instructions a second on this PC (compare versions, not machines)
 # make keys         every C47-layout key run on the ROM -> build/keys/keys-*.png: look that each does what it says
 
 TARGET    = HP47
@@ -86,6 +87,11 @@ $(T)/hptest: test/hptest.c src/hp48.c src/hp48.h $(X48)
 	mkdir -p $(T)
 	$(HOSTCC) -o $@ test/hptest.c src/hp48.c $(X48)
 
+bench: $(T)/hptest
+	@test -f $(ROM) || { echo "make bench: no ROM at $(ROM) (roms/README.md)"; exit 1; }
+	$(T)/hptest $(ROM) WAIT:3000 KEY:F WAIT:1000 KEY:LSHIFT KEY:SUB "TYPE:1 3000 START 1 SIN DROP NEXT" KEY:ENTER \
+	  WAIT:300 KEY:EVAL BUSY
+
 keys: $(T)/hptest
 	$(PYTHON) test/keys_check.py $(T)/hptest $(ROM) $(BUILD_DIR)/keys
 
@@ -106,4 +112,4 @@ clean:
 
 -include $(wildcard $(BUILD_DIR)/.dep/*)
 
-.PHONY: all test keys sim shots clean
+.PHONY: all test bench keys sim shots clean

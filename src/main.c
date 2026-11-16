@@ -25,6 +25,8 @@
 #define CFG_FILE   DIR "/HP47.CFG"
 #define STATE_FILE DIR "/HP47.STA"
 #define FRAME_MS   20
+#define RUN_MS     16                       /* the HP runs at most this long a frame */
+#define SLICE_I    2000u                    /* instructions a slice (then the clock is read again) */
 #define HP_IPS     830000u                  /* instructions a second of a real 48GX (its BEEP: test/beep.sh) */
 
 typedef struct { int layout, sound, speed, turbo; } Cfg;
@@ -659,7 +661,8 @@ static void menu_run(void) {
     case KEY_4: cfg.turbo ^= 1; break;
     case KEY_5: keyhelp(); break;
     case KEY_6: keytest(); break;
-    case KEY_7: wait_release(); handle_menu(&SETUP_MENU, MENU_RESET, 0); wait_release(); break;
+    case KEY_7:                                         /* System may leave HP47: the HP's state first */
+      state_save(); wait_release(); handle_menu(&SETUP_MENU, MENU_RESET, 0); wait_release(); break;
     case KEY_8: about(); break;
     default: continue;
     }
@@ -717,7 +720,8 @@ void program_main(void) {
   frame_ui();
   if (s == -2) say("LCD layout not learnt: slow drawing");
 
-  uint32_t last = sys_current_ms(), last_auto = last, sec = last, busy_i = 0, busy_ms = 0;
+  uint32_t last = sys_current_ms(), last_auto = last, sec = last, busy_i = 0, busy_ms = 0, owed = 0, frame_t0 = last;
+  int busy_prev = 0;
   for (;;) {
     if (ST(STAT_PGM_END) || ST(STAT_SUSPENDED)) power_off();
     if (ST(STAT_POWER_CHANGE)) { switch_usb_powered_freq(); CLR_ST(STAT_POWER_CHANGE); }
@@ -732,15 +736,28 @@ void program_main(void) {
     if (menu_off) { menu_off = 0; power_off(); last = sys_current_ms(); continue; }
     q_run();
 
-    uint32_t now = sys_current_ms(), dt = now - last;
-    last = now;
-    if (dt > 100) dt = 100;                             /* a long wait (a menu): the HP's time does not jump */
-    if (dt == 0) dt = 1;
-    uint32_t budget = HP_IPS / 1000u * (dt > 50 ? 50 : dt);
-    if (cfg.turbo) budget *= 8;
-    uint32_t i0 = hp.instr;
-    hp_run(dt, budget);
-    if (!hp.sleeping) { busy_i += hp.instr - i0; busy_ms += dt; }   /* the HP worked all of this frame */
+    /* run the HP: in slices, by the wall clock. Its timers get the real time that passed; its CPU gets the
+       instructions a real 48GX would run in that time (owed), or in turbo as many as fit. A frame runs at most
+       RUN_MS, so the keys and the screen stay live however slow or fast the CPU is. */
+    uint32_t t0 = sys_current_ms(), now = t0;
+    if (busy_prev) busy_ms += t0 - frame_t0;            /* the last frame (its run and its sleep) was busy */
+    frame_t0 = t0;
+    for (;;) {
+      uint32_t r = now - last;
+      last = now;
+      if (r > 200) r = 200;                             /* a long wait (a menu): the HP's time does not jump */
+      owed += HP_IPS / 1000u * r;
+      if (owed > HP_IPS / 20u) owed = HP_IPS / 20u;     /* too slow: at most 50 ms of work carried over */
+      uint32_t n = cfg.turbo ? SLICE_I : (owed < SLICE_I ? owed : SLICE_I);
+      uint32_t i0 = hp.instr;
+      hp_run(r, n);
+      uint32_t done = hp.instr - i0;
+      owed = hp.sleeping ? 0 : owed > done ? owed - done : 0;
+      busy_i += done;
+      now = sys_current_ms();
+      if (hp.sleeping || hp.bad || now - t0 >= RUN_MS || (!cfg.turbo && !owed)) break;
+    }
+    busy_prev = !hp.sleeping;
     sound();
 
     int on = hp_lcd(lcd);
@@ -758,13 +775,13 @@ void program_main(void) {
 
     now = sys_current_ms();
     if (now - sec >= 1000) {                            /* busy: as fast as a real 48GX = 100% */
-      pct = busy_ms >= 100 ? (int)((uint64_t)busy_i * 100000u / ((uint64_t)busy_ms * HP_IPS)) : -1;
+      pct = busy_ms >= 100 ? (int)((uint64_t)busy_i * 100000u / ((uint64_t)busy_ms * HP_IPS)) : -1;   /* wall time */
       if (pct > 999) pct = 999;
       busy_i = busy_ms = 0; sec = now;
     }
     if (now - last_auto > 10000) { reset_auto_off(); last_auto = now; }
 
-    uint32_t spent = sys_current_ms() - last;           /* sleep the rest of the frame; longer while the HP sleeps */
+    uint32_t spent = sys_current_ms() - frame_t0;       /* sleep the rest of the frame; longer while the HP sleeps */
     uint32_t want = hp.sleeping && !q_busy() && !k1 && !k2 && !tone ? 50 : FRAME_MS;
     if (spent < want && key_empty()) {
       sys_timer_start(0, want - spent);

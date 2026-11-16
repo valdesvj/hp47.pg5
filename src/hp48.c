@@ -217,8 +217,33 @@ static int io_read(int r) {
 /* x48's controllers: 0 I/O (one config: the address, 0x40 nibbles), 1 RAM, 2 bank switcher, 3 port 1, 4 port 2
    (two configs: size mask, then address), 5 ROM (always there, everywhere, lowest priority) */
 enum { K_NONE, K_IO, K_RAM, K_BANK, K_PORT, K_ROM };
-enum { P_ROM, P_RAM, P_SLOW };
-static struct { uint8_t kind; uint32_t off; } *page;   /* 256 pages of 4 K nibbles (heap: DMCP has 8 KB of static RAM) */
+/* the page table: 4096 pages of 256 nibbles (heap, 16 KB). An entry: PG_SLOW (decode it: I/O, the bank switcher,
+   ports, a controller's edge), else the nibble index of the page's start in the ROM, or in the RAM with PG_RAM.
+   256 nibbles: the I/O registers (64 nibbles at 00100) then slow only 00100..001FF, not the ROM's busy first 4 K. */
+#define PG_SLOW 0x80000000u
+#define PG_RAM  0x40000000u
+#define PG_IX   0x000fffffu
+static uint32_t *page;
+
+/* the instruction window (hp47_x48.h): 16 nibbles from the PC, when they lie in one ROM or RAM page */
+uint64_t hp47_win;
+uint32_t hp47_pc0, hp47_wlen;
+
+static inline void prefetch(uint32_t pc) {
+  pc &= 0xfffff;
+  if (((pc - hp47_pc0) & 0xfffff) + 8 <= hp47_wlen) return;  /* the window still holds 8 nibbles from here */
+  uint32_t e = page[pc >> 8], off = pc & 0xff, i;
+  const uint8_t *m;
+  hp47_wlen = 0;
+  if ((e & PG_SLOW) || off > 256 - 16) return;
+  if (e & PG_RAM) { i = (e & PG_IX) + off; if (i + 16 > RAM_NIBS) return; m = ram; }
+  else { i = e + off; m = rom; }
+  const uint8_t *p = m + (i >> 1);
+  uint64_t w;
+  memcpy(&w, p, 8);                                       /* little-endian: the low nibble first, as the ROM */
+  if (i & 1) w = w >> 4 | (uint64_t)(p[8] & 15) << 60;
+  hp47_win = w; hp47_pc0 = pc; hp47_wlen = 16;
+}
 
 static int ctl_range(int i, uint32_t *s, uint32_t *e) {
   if (i == 5) { *s = 0; *e = 0xfffff; return 1; }
@@ -242,18 +267,19 @@ static int decode(uint32_t a, uint32_t *off) {
 }
 
 void hp47_mmu_changed(void) {
+  hp47_wlen = 0;
   if (!page) return;
-  for (int p = 0; p < 256; p++) {
-    uint32_t lo = (uint32_t)p << 12, hi = lo + 0xfff;
-    page[p].kind = P_SLOW;
+  uint32_t S[6], E[6];
+  int on[6];
+  for (int i = 0; i < 6; i++) on[i] = ctl_range(i, &S[i], &E[i]);
+  for (uint32_t p = 0; p < 4096; p++) {
+    uint32_t lo = p << 8, hi = lo + 0xff;
+    page[p] = PG_SLOW;
     for (int i = 0; i < 6; i++) {
-      uint32_t s, e;
-      if (!ctl_range(i, &s, &e) || e < lo || s > hi) continue;
+      if (!on[i] || E[i] < lo || S[i] > hi) continue;
       int k = ctl_kind(i);
-      if (s <= lo && e >= hi && (k == K_ROM || k == K_RAM)) {
-        page[p].kind = k == K_ROM ? P_ROM : P_RAM;
-        page[p].off = lo - s;
-      }
+      if (S[i] <= lo && E[i] >= hi && (k == K_ROM || k == K_RAM))
+        page[p] = (k == K_RAM ? PG_RAM : 0) | ((lo - S[i]) & PG_IX);
       break;                                              /* the highest controller there decides */
     }
   }
@@ -277,18 +303,17 @@ static int slow_read(uint32_t a, int side) {
 }
 
 int read_nibble(long addr) {
-  uint32_t a = (uint32_t)addr & 0xfffff;
-  uint8_t k = page[a >> 12].kind;
-  if (k == P_ROM) return nib(rom, a);
-  if (k == P_RAM) return nib(ram, (page[a >> 12].off + (a & 0xfff)) & (RAM_NIBS - 1));
+  uint32_t a = (uint32_t)addr & 0xfffff, e = page[a >> 8];
+  if (!(e & (PG_SLOW | PG_RAM))) return nib(rom, e + (a & 0xff));
+  if (!(e & PG_SLOW)) return nib(ram, ((e & PG_IX) + (a & 0xff)) & (RAM_NIBS - 1));
   return slow_read(a, 1);
 }
 
 static int peek(uint32_t a) {           /* no side effects (the LCD) */
   a &= 0xfffff;
-  uint8_t k = page[a >> 12].kind;
-  if (k == P_ROM) return nib(rom, a);
-  if (k == P_RAM) return nib(ram, (page[a >> 12].off + (a & 0xfff)) & (RAM_NIBS - 1));
+  uint32_t e = page[a >> 8];
+  if (!(e & (PG_SLOW | PG_RAM))) return nib(rom, e + (a & 0xff));
+  if (!(e & PG_SLOW)) return nib(ram, ((e & PG_IX) + (a & 0xff)) & (RAM_NIBS - 1));
   return slow_read(a, 0);
 }
 
@@ -299,10 +324,10 @@ int read_nibble_crc(long addr) {
 }
 
 void write_nibble(long addr, int val) {
-  uint32_t a = (uint32_t)addr & 0xfffff, off;
-  uint8_t k = page[a >> 12].kind;
-  if (k == P_RAM) { nib_set(ram, (page[a >> 12].off + (a & 0xfff)) & (RAM_NIBS - 1), val & 15); return; }
-  if (k == P_ROM) return;
+  uint32_t a = (uint32_t)addr & 0xfffff, off, e = page[a >> 8];
+  if (((a - hp47_pc0) & 0xfffff) < hp47_wlen) hp47_wlen = 0;   /* a write into the instruction window */
+  if ((e & (PG_SLOW | PG_RAM)) == PG_RAM) { nib_set(ram, ((e & PG_IX) + (a & 0xff)) & (RAM_NIBS - 1), val & 15); return; }
+  if (!(e & PG_SLOW)) return;                             /* the ROM */
   switch (decode(a, &off)) {
   case K_IO: io_write((int)off, val & 15); break;
   case K_RAM: nib_set(ram, off & (RAM_NIBS - 1), val & 15); break;
@@ -325,7 +350,7 @@ void dev_memory_init(void) {}
 
 /* ------------------------------------------------------------------ the machine */
 int hp_init(const uint8_t *r, uint8_t *m) {
-  if (!page) page = malloc(256 * sizeof *page);
+  if (!page) page = malloc(4096 * sizeof *page);
   if (!page) return -1;
   rom = r;
   ram = m;
@@ -365,12 +390,14 @@ void hp_run(uint32_t ms, uint32_t max_instr) {
   t2_frac += ms * 8192u;
   uint32_t ticks = t2_frac / 1000u;
   t2_frac %= 1000u;
-  if (!ticks) ticks = 1;                                  /* at least one slice */
+  int no_tick = !ticks;                                   /* less than a tick of time: instructions only */
+  if (no_tick) ticks = 1;
   uint32_t per = max_instr / ticks, extra = max_instr % ticks;
   for (uint32_t k = 0; k < ticks; k++) {
     uint32_t n = per + (k < extra);
     while (n-- && !hp.sleeping && !hp.bad) {
       long pc = saturn.PC;
+      prefetch((uint32_t)pc);
       step_instruction();
       hp.instr++;
       if (enter_debugger) {                               /* an unknown opcode: stop, keep its address */
@@ -378,7 +405,7 @@ void hp_run(uint32_t ms, uint32_t max_instr) {
         enter_debugger = 0;
       }
     }
-    tick();
+    if (!no_tick) tick();
   }
 }
 

@@ -70,6 +70,11 @@ The HP's ON combinations work: hold EXIT (ON) and press another key (ON+C restar
 | **F4 ON+C · F5 CLEAR · F6 OFF** | restart (the RAM kept) · clear all of the HP's memory (asks first) · off |
 | **1** keys · **2** sound | C47 / HP48 layout · the HP's beeper on the buzzer |
 | **3** speed shown · **4** speed | the HP's speed against a real 48GX in the status line · an HP 48GX's / as fast as it goes |
+
+**Speed.** While the HP works (not waiting for a key), the status line shows how many instructions it runs against
+a real 48GX (about 830,000 a second): 100% is a real one's speed. The HP runs at most 16 ms of every 20 ms frame, so
+the keys and the screen answer at once even when the calculator is slower than an HP 48; its clock keeps real time.
+On USB power the DM42n runs at 160 MHz, on battery at 80 MHz.
 | **5** key help · **6** key test | the C47 legends and what each does here · the keys as numbers |
 | **7** setup · **8** about | DMCP's setup (USB disk, System, time, date, beep) · version, licences, ROM, memory |
 
@@ -90,6 +95,7 @@ cd ~/opt/hp47.pg5
 make              # -> build/HP47.pg5 (copy it to release/ for a release)
 make ROM_IN=roms/gxrom-r   # the ROM built in: for your own calculator only, never released
 make test         # boot, arithmetic, the state round trip, the BEEP's pitch (on the real ROM)
+make bench        # a busy RPL loop: HP instructions a second on this PC (to compare versions)
 make keys         # every C47-layout key run on the ROM -> build/keys/keys-*.png
 make shots        # the PC simulator's screens -> build/sim/run/*.png
 python3 tools/keymap.py docs/keymap.png    # the keys picture

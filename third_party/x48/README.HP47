@@ -4,4 +4,7 @@ keyboard interrupt) with these changes, each marked "HP47" in the code:
   - the memory, the I/O registers, the timers, SHUTDN and the display are HP47's own (src/hp48.c): the ROM and RAM
     stay packed two nibbles a byte, and the memory controllers are decoded into a page table (hp47_mmu_changed);
   - OUT writes call hp47_out_changed (the beeper);
+  - the opcode's nibbles are read through fetch_nib/fetch_nibs (hp47_x48.h): 16 nibbles fetched at once from the
+    PC (src/hp48.c), as x48 reads an opcode a nibble at a time, often the same one again (emulate.c, and
+    load_constant, load_addr, load_address in actions.c);
   - the X11, debugger, serial and timer parts are left out (#ifndef HP47; small stub headers).

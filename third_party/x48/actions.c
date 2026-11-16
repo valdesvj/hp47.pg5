@@ -823,6 +823,7 @@ int n;
   return str;
 }
 
+/* HP47: load_constant, load_addr and load_address read the instruction through fetch_nib (hp47_x48.h) */
 void
 #ifdef __FunctionProto__
 load_constant(unsigned char *reg, int n, long addr)
@@ -837,7 +838,7 @@ long addr;
 
   p = saturn.P;
   for (i = 0; i < n; i++) {
-    reg[p] = read_nibble(addr + i);
+    reg[p] = fetch_nib(addr + i);
     p = (p + 1) & 0xf;
   }
 }
@@ -856,7 +857,7 @@ int n;
 
   for (i = 0; i < n; i++) {
     *dat &= ~nibble_masks[i];
-    *dat |= read_nibble(addr + i) << (i * 4);
+    *dat |= fetch_nib(addr + i) << (i * 4);
   }
 }
 
@@ -873,7 +874,7 @@ int n;
   int i;
 
   for (i = 0; i < n; i++) {
-    reg[i] = read_nibble(addr + i);
+    reg[i] = fetch_nib(addr + i);
   }
 }
 
