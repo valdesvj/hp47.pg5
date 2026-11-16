@@ -32,7 +32,7 @@ static Cfg cfg = { LAYOUT_C47, 1, 0, 0 };
 
 static uint8_t *ram;                        /* 128 KB, heap */
 static const uint8_t *rom;                  /* 512 KB: heap or QSPI */
-static int rom_where;                       /* 0 none, 1 heap, 2 QSPI user area */
+static int rom_where;                       /* 0 none, 1 heap, 2 QSPI user area, 3 built in (ROM_IN) */
 static uint32_t rom_crc;
 static char rom_ver[16] = "";
 static char msg[64] = "";                   /* the menu's message line */
@@ -223,13 +223,21 @@ static int rom_load(const char *path) {
       }
       free(buf);
     }
-  } else snprintf(msg, sizeof msg, "no room for the ROM (heap %u KB)", (unsigned)(sys_largest_free_mem() / 1024));
+  } else snprintf(msg, sizeof msg, "no room: heap %u KB, QSPI %u KB (512 needed)",
+                  (unsigned)(sys_largest_free_mem() / 1024), (unsigned)(qspi_user_size() / 1024));
   f_close(&r->f);
   free(r);
   return e;
 }
 
-static int rom_find(void) {                 /* the ROM under one of its usual names */
+#ifdef HP47_ROM_IN
+extern const uint8_t hp47_rom[];            /* make ROM_IN=...: the ROM in the program's flash (src/rom_in.s) */
+#endif
+
+static int rom_find(void) {                 /* the ROM built in, else under one of its usual names */
+#ifdef HP47_ROM_IN
+  if (is_48g(hp47_rom)) { rom = hp47_rom; rom_where = 3; rom_crc = crc32_add(0, hp47_rom, HP_ROM_BYTES); return 0; }
+#endif
   for (unsigned i = 0; i < sizeof ROM_NAMES / sizeof *ROM_NAMES; i++)
     if (file_exists(ROM_NAMES[i])) return rom_load(ROM_NAMES[i]);
   snprintf(msg, sizeof msg, "no ROM: copy one to %s/HP48.ROM", DIR);
@@ -550,7 +558,7 @@ static void about(void) {
   };
   for (unsigned i = 0; i < sizeof L / sizeof *L; i++) { text(4, y, L[i], 0); y += 21; }
   sprintf(s, "ROM: %s %s (crc %08x)", rom_ver[0] ? rom_ver : "none",
-          rom_where == 1 ? "in the heap" : rom_where == 2 ? "in QSPI" : "", (unsigned)rom_crc);
+          rom_where == 1 ? "in the heap" : rom_where == 2 ? "in QSPI" : rom_where == 3 ? "built in" : "", (unsigned)rom_crc);
   text(4, y + 4, s, 0); y += 25;
   sprintf(s, "Free heap: %d KB  (largest %d KB)", sys_free_mem() / 1024, sys_largest_free_mem() / 1024);
   text(4, y, s, 0); y += 21;

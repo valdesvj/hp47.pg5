@@ -2,7 +2,9 @@
 # HP47 - an HP 48GX for the SwissMicros DM42n (DMCP5 native program, .pg5)
 # Based on the SwissMicros DMCP5_SDK Makefile (BSD-3), as ZX47, Chess 47, NAV47, TERM47 and GB47
 ######################################
-# make              build/HP47.pg5 (loads on DMCP5 3.57 and later: interface 3.17)
+# make              build/HP47.pg5 (loads on DMCP5 3.57 and later: interface 3.17); it reads the ROM from /HP47
+# make ROM_IN=roms/gxrom-r   the ROM built into the program's flash: needs no heap for it. For your own
+#                   calculator only: HP's ROM may not be shared, so never publish a .pg5 built this way.
 # The tests need an HP 48G/GX ROM, which is not in the repo: roms/gxrom-r (hpcalc.org), or ROM=path.
 # make test         the PC tests: boot, keys, arithmetic, the state round trip, the BEEP's pitch, the C47 keys
 # make sim          the PC simulator (build/sim/sim); make shots: its screens -> build/sim/run/*.png
@@ -44,6 +46,19 @@ $(BUILD_DIR)/%.o: %.c Makefile | $(BUILD_DIR)/.dep
 
 $(BUILD_DIR)/%.o: %.s Makefile | $(BUILD_DIR)/.dep
 	$(AS) -c $(CFLAGS) $< -o $@
+
+# the ROM built in (ROM_IN=path); main.o is rebuilt when ROM_IN changes
+ROMCFG := $(BUILD_DIR)/rom_in.cfg
+$(shell mkdir -p $(BUILD_DIR); echo "$(ROM_IN)" | cmp -s - $(ROMCFG) 2>/dev/null || echo "$(ROM_IN)" > $(ROMCFG))
+$(BUILD_DIR)/main.o: $(ROMCFG)
+ifneq ($(ROM_IN),)
+C_DEFS  += -DHP47_ROM_IN
+OBJECTS += $(BUILD_DIR)/rom_in.o
+$(BUILD_DIR)/rom.bin: $(ROM_IN) tools/rompack.py
+	$(PYTHON) tools/rompack.py $< $@
+$(BUILD_DIR)/rom_in.o: src/rom_in.s $(BUILD_DIR)/rom.bin | $(BUILD_DIR)/.dep
+	$(AS) -c $(CFLAGS) -DHP47_ROM_BIN='"$(BUILD_DIR)/rom.bin"' $< -o $@
+endif
 
 $(BUILD_DIR)/$(TARGET).elf: $(OBJECTS) Makefile
 	$(CC) $(OBJECTS) $(LDFLAGS) -o $@

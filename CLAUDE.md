@@ -6,6 +6,7 @@
 - third_party/x48 is x48's Saturn CPU (GPL-2.0-or-later), changes marked "HP47" and listed in README.HP47.
 - DMCP5: 8 KB of static RAM. Big buffers go on the heap (the RAM, the ROM, the page table, the LCD copy); check .bss.
 - The ROM is HP's: never commit it (roms/ is ignored but for its README). The tests need roms/gxrom-r.
+- release/HP47.pg5 is always built with plain make: never with ROM_IN (that one carries HP's ROM).
 - make test, make keys and make shots before committing; look at every screen. The simulator's timings mean nothing.
 - A key in src/keys.c changed: run make keys and look at its screen; then python3 tools/keymap.py docs/keymap.png.
 - Ask before anything that can't be undone. Pull requests only for hp47.pg5.
