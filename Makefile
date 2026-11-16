@@ -3,6 +3,7 @@
 # Based on the SwissMicros DMCP5_SDK Makefile (BSD-3), as ZX47, Chess 47, NAV47, TERM47 and GB47
 ######################################
 # make              build/HP47.pg5 (loads on DMCP5 3.57 and later: interface 3.17); it reads the ROM from /HP47
+# make clean; make CORE_OPT=-Os TARGET=HP47S   the Saturn core built for size (a second .pg5, to compare speeds)
 # make ROM_IN=roms/gxrom-r   the ROM built into the program's flash: needs no heap for it. For your own
 #                   calculator only: HP's ROM may not be shared, so never publish a .pg5 built this way.
 # The tests need an HP 48G/GX ROM, which is not in the repo: roms/gxrom-r (hpcalc.org), or ROM=path.
@@ -16,6 +17,7 @@ BUILD_DIR = build
 PYTHON   ?= python3
 IFC      ?= 17
 ROM      ?= roms/gxrom-r
+CORE_OPT ?= -O2                             # the Saturn core's optimisation: -O2, -Os, -O3 (make clean between)
 
 CC      = arm-none-eabi-gcc
 AS      = arm-none-eabi-gcc -x assembler-with-cpp
@@ -43,7 +45,7 @@ OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ASM_SOURCES:.s=.o)))
 vpath %.s $(sort $(dir $(ASM_SOURCES)))
 
 $(BUILD_DIR)/%.o: %.c Makefile | $(BUILD_DIR)/.dep
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) $(if $(filter third_party/x48/%,$<),$(CORE_OPT)) $< -o $@
 
 $(BUILD_DIR)/%.o: %.s Makefile | $(BUILD_DIR)/.dep
 	$(AS) -c $(CFLAGS) $< -o $@

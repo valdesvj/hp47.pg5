@@ -25,7 +25,7 @@
 #define CFG_FILE   DIR "/HP47.CFG"
 #define STATE_FILE DIR "/HP47.STA"
 #define FRAME_MS   20
-#define RUN_MS     16                       /* the HP runs at most this long a frame */
+#define RUN_MS     18                       /* the HP runs at most this long a frame (keys, screen: the rest) */
 #define SLICE_I    2000u                    /* instructions a slice (then the clock is read again) */
 #define HP_IPS     830000u                  /* instructions a second of a real 48GX (its BEEP: test/beep.sh) */
 
@@ -805,7 +805,8 @@ void program_main(void) {
 
     uint32_t spent = sys_current_ms() - frame_t0;       /* sleep the rest of the frame; longer while the HP sleeps */
     uint32_t want = hp.sleeping && !q_busy() && !k1 && !k2 && !tone ? 50 : FRAME_MS;
-    if (spent < want && key_empty()) {
+    int behind = !hp.sleeping && (cfg.turbo || owed);   /* the HP still has work: no sleep, all time to it */
+    if (spent < want && key_empty() && !behind) {
       sys_timer_start(0, want - spent);
       CLR_ST(STAT_RUNNING);
       sys_sleep();
