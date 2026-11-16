@@ -1,6 +1,7 @@
 x48 0.6.4's Saturn CPU (github.com/deadcodesoc/x48, src/), by Eddie C. Dost, GPL-2.0-or-later (COPYING).
 HP47 uses emulate.c (the instructions), register.c (the registers) and actions.c (CONFIG/UNCNFG/C=ID, RESET, the
 keyboard interrupt) with these changes, each marked "HP47" in the code:
+  - the ROM may be paged in 2 KB blocks from its file (src/hp48.c, the ROM cache);
   - the memory, the I/O registers, the timers, SHUTDN and the display are HP47's own (src/hp48.c): the ROM and RAM
     stay packed two nibbles a byte, and the memory controllers are decoded into a page table (hp47_mmu_changed);
   - OUT writes call hp47_out_changed (the beeper);

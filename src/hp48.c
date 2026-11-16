@@ -27,7 +27,18 @@ int enter_debugger, in_debugger, opt_gx = 1;
 long nibble_masks[16] = { 0xf, 0xf0, 0xf00, 0xf000, 0xf0000, 0xf00000, 0xf000000, 0xf0000000,
                           0xf, 0xf0, 0xf00, 0xf000, 0xf0000, 0xf00000, 0xf000000, 0xf0000000 };
 
-static const uint8_t *rom;
+static const uint8_t *rom;               /* the ROM's bytes as the CPU sees them: all of it, or the cache's slots */
+
+/* the ROM cache: the ROM in blocks of 2 KB (4 K nibbles), as many as the heap allows, read from the ROM file on the
+   first use (hp_rom_fetch). Resident (hp_init): every block in its own place, nothing is ever read. */
+#define BLK_NIBS 4096u
+#define NBLK     256
+static int16_t slot_of[NBLK];               /* block -> slot, -1 not loaded */
+static int16_t *blk_of;                     /* slot -> block, -1 free */
+static uint32_t *stamp;                     /* slot -> the tick it was last used (the PC was in it) */
+static int nslot, paged;
+static uint32_t ticks_now;
+static int (*rom_fetch)(uint32_t blk, uint8_t *dst);
 static uint8_t *ram;
 #define RAM_NIBS (HP_RAM_BYTES * 2)
 
@@ -278,11 +289,48 @@ void hp47_mmu_changed(void) {
     for (int i = 0; i < 6; i++) {
       if (!on[i] || E[i] < lo || S[i] > hi) continue;
       int k = ctl_kind(i);
-      if (S[i] <= lo && E[i] >= hi && (k == K_ROM || k == K_RAM))
-        page[p] = (k == K_RAM ? PG_RAM : 0) | ((lo - S[i]) & PG_IX);
+      if (S[i] <= lo && E[i] >= hi && k == K_RAM) page[p] = PG_RAM | ((lo - S[i]) & PG_IX);
+      if (S[i] <= lo && E[i] >= hi && k == K_ROM && !((lo - S[i]) & 0xff)) {
+        uint32_t ix = (lo - S[i]) & 0xfffff;               /* the ROM nibble: a page in its block's slot, if loaded */
+        int sl = slot_of[ix / BLK_NIBS];
+        if (sl >= 0) page[p] = (uint32_t)sl * BLK_NIBS + ix % BLK_NIBS;
+      }
       break;                                              /* the highest controller there decides */
     }
   }
+}
+
+/* a ROM block into a slot: a free one, else the one used longest ago (never the PC's) */
+static int rom_load(uint32_t b) {
+  int sl = -1;
+  for (int i = 0; i < nslot && sl < 0; i++) if (blk_of[i] < 0) sl = i;
+  if (sl < 0) {
+    uint32_t pcb = ((uint32_t)saturn.PC & 0xfffff) / BLK_NIBS, best = 0;
+    for (int i = 0; i < nslot; i++) {
+      uint32_t age = ticks_now - stamp[i];
+      if (blk_of[i] != (int)pcb && (sl < 0 || age > best)) { sl = i; best = age; }
+    }
+    slot_of[blk_of[sl]] = -1;
+  }
+  if (!rom_fetch || rom_fetch(b, (uint8_t *)rom + (uint32_t)sl * (BLK_NIBS / 2))) {
+    hp.bad = 2;                                             /* the ROM file could not be read */
+    hp.bad_pc = b * BLK_NIBS;
+    blk_of[sl] = -1;
+    return -1;
+  }
+  blk_of[sl] = (int16_t)b;
+  slot_of[b] = (int16_t)sl;
+  stamp[sl] = ticks_now;
+  hp.rom_loads++;
+  hp47_mmu_changed();                                       /* the pages of this block, and of the one it replaced */
+  return sl;
+}
+
+static int rom_nib(uint32_t ix) {          /* a ROM nibble by its index, its block loaded if needed */
+  ix &= 0xfffff;
+  int sl = slot_of[ix / BLK_NIBS];
+  if (sl < 0 && (sl = rom_load(ix / BLK_NIBS)) < 0) return 0;
+  return nib(rom, (uint32_t)sl * BLK_NIBS + ix % BLK_NIBS);
 }
 
 static int slow_read(uint32_t a, int side) {
@@ -297,7 +345,7 @@ static int slow_read(uint32_t a, int side) {
     }
     return 0x7;
   case K_PORT: return 0;                                  /* no card */
-  case K_ROM: return nib(rom, a);
+  case K_ROM: return rom_nib(off);
   default: return 0;
   }
 }
@@ -349,11 +397,23 @@ void write_nibbles(long addr, long val, int len) {
 void dev_memory_init(void) {}
 
 /* ------------------------------------------------------------------ the machine */
-int hp_init(const uint8_t *r, uint8_t *m) {
+static int init_common(uint8_t *m, int slots) {
   if (!page) page = malloc(4096 * sizeof *page);
-  if (!page) return -1;
-  rom = r;
+  free(blk_of); free(stamp);
+  blk_of = malloc((size_t)slots * sizeof *blk_of);
+  stamp = calloc((size_t)slots, sizeof *stamp);
+  if (!page || !blk_of || !stamp) return -1;
+  nslot = slots;
   ram = m;
+  for (int b = 0; b < NBLK; b++) slot_of[b] = -1;
+  for (int i = 0; i < slots; i++) blk_of[i] = -1;
+  return 0;
+}
+
+int hp_init(const uint8_t *r, uint8_t *m) {
+  if (init_common(m, NBLK)) return -1;
+  rom = r; paged = 0; rom_fetch = NULL;
+  for (int b = 0; b < NBLK; b++) { slot_of[b] = (int16_t)b; blk_of[b] = (int16_t)b; }
   hp_reset();
   return 0;
 }
@@ -384,6 +444,22 @@ void hp_reset(void) {
   hp47_mmu_changed();
 }
 
+int hp_init_paged(uint8_t *cache, int slots, int (*fetch)(uint32_t blk, uint8_t *dst), uint8_t *m) {
+  if (slots < 8 || slots > NBLK || init_common(m, slots)) return -1;
+  rom = cache; paged = 1; rom_fetch = fetch;
+  hp_reset();
+  return 0;
+}
+
+void hp_rom_flush(void) {                  /* forget the cached blocks (the ROM file was closed or changed) */
+  if (!paged) return;
+  for (int b = 0; b < NBLK; b++) slot_of[b] = -1;
+  for (int i = 0; i < nslot; i++) blk_of[i] = -1;
+  hp47_mmu_changed();
+}
+
+int hp_rom_slots(void) { return paged ? nslot : 0; }
+
 void hp_clear_ram(void) { memset(ram, 0, HP_RAM_BYTES); }
 
 void hp_run(uint32_t ms, uint32_t max_instr) {
@@ -406,6 +482,11 @@ void hp_run(uint32_t ms, uint32_t max_instr) {
       }
     }
     if (!no_tick) tick();
+    ticks_now++;
+    if (paged) {                                            /* the PC's block is in use */
+      int sl = slot_of[((uint32_t)saturn.PC & 0xfffff) / BLK_NIBS];
+      if (sl >= 0) stamp[sl] = ticks_now;
+    }
   }
 }
 
@@ -451,7 +532,7 @@ int hp_annunc(void) { return saturn.annunc & 0xff; }
 const char *hp_rom_version(char s[16]) {
   if (!rom) return NULL;
   static const char want[] = "HP48-";
-  for (int i = 0; i < 6; i++) s[i] = (char)(nib(rom, 0x7ffbf + 2 * i) | nib(rom, 0x7ffbf + 2 * i + 1) << 4);
+  for (int i = 0; i < 6; i++) s[i] = (char)(rom_nib(0x7ffbf + 2u * (uint32_t)i) | rom_nib(0x7ffbf + 2u * (uint32_t)i + 1) << 4);
   s[6] = 0;
   return memcmp(s, want, 5) ? NULL : s;
 }

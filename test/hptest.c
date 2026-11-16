@@ -1,5 +1,6 @@
 /* hptest.c - HP47 on the PC: boots a 48G/GX ROM and types on it, checking the screen.
- *   hptest ROM [-v] [script...]
+ *   hptest ROM [-v] [-cache SLOTS] [script...]   (-cache: the ROM read through the 2 KB block cache, as on
+ *   a calculator with a small heap; the results must not change)
  * The script: words run in order, each a frame of 20 ms of HP time unless WAIT:
  *   WAIT:ms       run that long        KEY:name       press and release a key (as hp48.h without HK_: 7 ENTER LSHIFT ...)
  *   SHOT:file     the LCD as a .pbm (test/run.sh compares them with test/ref)
@@ -112,6 +113,11 @@ static void state_round_trip(const char *fn) {
   free(b);
 }
 
+static uint8_t *rom_all;
+static unsigned long fetches;
+static int fetch(uint32_t blk, uint8_t *dst) { memcpy(dst, rom_all + blk * 2048u, 2048); fetches++; return 0; }
+__attribute__((destructor)) static void fetch_report(void) { if (fetches) fprintf(stderr, "cache: %lu blocks read\n", fetches); }
+
 int main(int argc, char **argv) {
   if (argc < 2) { fprintf(stderr, "usage: hptest ROM [-v] [script]\n"); return 2; }
   FILE *f = fopen(argv[1], "rb");
@@ -121,11 +127,16 @@ int main(int argc, char **argv) {
   size_t n = fread(rom, 1, HP_ROM_BYTES, f);
   fclose(f);
   if (n != HP_ROM_BYTES) { fprintf(stderr, "hptest: %s is %zu bytes, not %u\n", argv[1], n, HP_ROM_BYTES); return 2; }
-  hp_init(rom, ram);
+  rom_all = rom;
+  int slots = 0;
+  for (int j = 2; j + 1 < argc; j++) if (!strcmp(argv[j], "-cache")) slots = atoi(argv[j + 1]);
+  if (slots) { static uint8_t cache[256 * 2048]; if (hp_init_paged(cache, slots, fetch, ram)) return 2; }
+  else hp_init(rom, ram);
   char v[16];
   printf("ROM: %s\n", hp_rom_version(v) ? v : "not a 48G ROM");
   int i = 2;
   if (i < argc && !strcmp(argv[i], "-v")) { verbose = 1; i++; }
+  if (i + 1 < argc && !strcmp(argv[i], "-cache")) i += 2;
   if (i >= argc) { frames(4000); ascii(); }
   int fails = 0;
   for (; i < argc; i++) {
