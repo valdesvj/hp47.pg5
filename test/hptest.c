@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "hp48.h"
 
 #define BUDGET 12000                    /* instructions a 20 ms frame (about 600 000 a second) */
@@ -67,6 +68,36 @@ static int key(const char *n) {
   exit(2);
 }
 
+static void tap(int k) { hp_key(k, 1); frames(100); hp_key(k, 0); frames(100); }
+
+/* TYPE:text - typed with the HP's alpha lock: letters, digits, space, '.' */
+static void type(const char *t) {
+  static const int L[26] = { HK_A, HK_B, HK_C, HK_D, HK_E, HK_F, HK_MTH, HK_PRG, HK_CST, HK_VAR, HK_UP, HK_NXT,
+    HK_QUOTE, HK_STO, HK_EVAL, HK_LEFT, HK_DOWN, HK_RIGHT, HK_SIN, HK_COS, HK_TAN, HK_SQRT, HK_POW, HK_INV, HK_NEG, HK_EEX };
+  static const int D[10] = { HK_0, HK_1, HK_2, HK_3, HK_4, HK_5, HK_6, HK_7, HK_8, HK_9 };
+  tap(HK_ALPHA); tap(HK_ALPHA);
+  for (; *t; t++) {
+    if (*t >= 'A' && *t <= 'Z') tap(L[*t - 'A']);
+    else if (*t >= '0' && *t <= '9') tap(D[*t - '0']);
+    else if (*t == ' ') tap(HK_SPC);
+    else if (*t == '.') tap(HK_DOT);
+  }
+  tap(HK_ALPHA);
+}
+
+/* BUSY: run until the HP sleeps again (a program ran); the instructions, the PC's time, the HP time it took */
+__attribute__((noinline)) static void busy(void) {
+  struct timespec a, b;
+  uint32_t i0 = hp.instr, frames_n = 0;
+  clock_gettime(CLOCK_MONOTONIC, &a);
+  do { hp_run(20, 830000 / 50); frames_n++; } while (!hp.sleeping && frames_n < 50 * 600);
+  clock_gettime(CLOCK_MONOTONIC, &b);
+  double s = (double)(b.tv_sec - a.tv_sec) + (double)(b.tv_nsec - a.tv_nsec) / 1e9;
+  uint32_t n = hp.instr - i0;
+  printf("busy: %u instructions, %.2f s of HP time, %.3f s on this PC = %.1f M instructions/s\n",
+         n, frames_n / 50.0, s, n / s / 1e6);
+}
+
 static void state_round_trip(const char *fn) {
   uint32_t n = hp_state_size();
   uint8_t *b = malloc(n + HP_RAM_BYTES);
@@ -103,6 +134,8 @@ int main(int argc, char **argv) {
     else if (!strncmp(w, "KEY:", 4)) { int k = key(w + 4); hp_key(k, 1); frames(100); hp_key(k, 0); frames(100); }
     else if (!strncmp(w, "SHOT:", 5)) shot(w + 5);
     else if (!strncmp(w, "STATE:", 6)) state_round_trip(w + 6);
+    else if (!strncmp(w, "TYPE:", 5)) type(w + 5);
+    else if (!strcmp(w, "BUSY")) busy();
     else if (!strcmp(w, "BEEPSTAT")) { printf("beeper: %u edges in %u instructions\n", hp.toggles, hp.toggle_instr); hp.toggles = 0; }
     else { fprintf(stderr, "hptest: what is %s\n", w); return 2; }
     if (hp.bad) { printf("unknown opcode at %05x\n", hp.bad_pc); fails++; break; }
